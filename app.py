@@ -12,7 +12,7 @@ app.config['SOCK_SERVER_OPTIONS'] = {'ping_interval': 25}
 sock = Sock(app)
 
 # 设置 DashScope API Key
-dashscope.api_key = "sk-2b368fe2160f4223a82098770f28df0f"
+dashscope.api_key = "sk-2b368fe2160f4223a82098770f28df0"
 
 # 模型参数
 TTS_MODEL = "cosyvoice-v2"
