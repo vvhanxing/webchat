@@ -1,121 +1,551 @@
-
-<!-- templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>流式TTS</title>
+    <meta charset="UTF-8">
+    <title>智能对练Agent</title>
+    <link rel="stylesheet" href="https://public.codepenassets.com/css/reset-2.0.min.css">
+    <link rel="stylesheet" href="./static/style.css">
+    <script src="./static/echarts.min.js"></script>
+
+
 </head>
 
 <body>
-    <h2>文本转语音（流式）</h2>
-    <input type="text" id="text-input" placeholder="输入文本..." />
-    <button id="send-btn">发送</button>
-    <audio id="audio-player" controls autoplay></audio>
+    <!-- partial:index.partial.html -->
+    <div class="container">
 
-    <script>
-        const ws = new WebSocket(`ws:${window.location.host}/tts`);
-        const audioPlayer = document.getElementById("audio-player");
-        const mediaSource = new MediaSource();
-        let sourceBuffer = null;
 
-        audioPlayer.src = URL.createObjectURL(mediaSource);
+        <div class="screen screen-2 raised">
+            <div class="top">
+                <div class="bubbles">
+                    <div class="bubble"></div>
+                    <div class="bubble"></div>
+                    <div class="bubble"></div>
+                </div>
 
-        mediaSource.addEventListener('sourceopen', () => {
-            sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-            sourceBuffer.mode = 'sequence';
-        });
+            </div>
+            <div class="bottom">
+                <div class="nav">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot active"></div>
+                </div>
+                <h1 class="title">产品售后与用户对话场景演练</h1>
+                <p>模拟用户现场对话场景</p>
+                <div class="call-to-action">
+                    <button class="clay">开始对练</button>
+                </div>
+            </div>
 
-        let buffer = [];
+        </div>
 
-        function appendBuffer(data) {
-            if (sourceBuffer && !sourceBuffer.updating) {
-                if (buffer.length > 0) {
-                    const chunk = buffer.shift();
-                    sourceBuffer.appendBuffer(chunk);
+
+
+        <!-- ========== 新增 screen-4  ============ -->
+        <div class="screen screen-4 raised">
+
+            <!-- 视频标题 -->
+            <div class="video-title">🚩改进型辅导的思路与...</div>
+            <!-- 里程碑 -->
+            <div class="milestone">里程碑: 0/7</div>
+
+            <span class="material-icons close-btn">close</span>
+            <!-- 动态人物动画区域 -->
+            <div class="character-animation" id="character-animation"></div>
+            <!-- 对话内容容器 -->
+            <div class="chat-container">
+                <!-- <div class="chat-message assistant">
+                    <p>吗？还是说最近的工作压力大呢？</p>
+                </div>
+                <div class="chat-message user">
+                    <p>也没啥，工作也还是跟往常一样的，领导您放心吧。我这最近确实忙，得照顾家里，还得工作，压力是有点大，但我能克服，我工作还是挺认真的，我觉着没啥问题啊。</p>
+                </div> -->
+                <div id="chat-messages"></div>
+            </div>
+            <!-- 录音按钮区域 -->
+            <div class="record-area">
+                <button id="record-btn">点击说话</button>
+            </div>
+
+        </div>
+
+
+        <div class="screen screen-1 raised">
+            <div class="cs-name">
+                <span>培训分析报告</span>
+                <span class="material-icons bell">notifications</span>
+            </div>
+
+            <!-- 搜索框保留 -->
+            <div class="cs-search">
+                <input type="search" placeholder="搜索...">
+                <span class="material-icons search-icon">search</span>
+            </div>
+
+            <!-- 雷达图容器 -->
+            <div class="report-section">
+                <div class="cs-name">
+                    <span>能力雷达图</span>
+                </div>
+                <div id="radarChart" style="width: 240%; height: 260px;"></div>
+            </div>
+
+            <!-- 改进计划 -->
+            <div class="improvement-plan cs-activities">
+                <div class="cs-name">
+                    <span>改进计划</span>
+                </div>
+                <menu class="activities-list">
+                    <li class="item-category work">
+                        <span class="material-icons">edit</span>
+                        <span class="text">提升沟通技巧</span>
+                    </li>
+                    <li class="item-category leisure not-active">
+                        <span class="material-icons-outlined">timer</span>
+                        <span class="text">优化时间管理</span>
+                    </li>
+                    <li class="item-category education not-active">
+                        <span class="material-icons-outlined">people</span>
+                        <span class="text">加强团队协作意识</span>
+                    </li>
+                </menu>
+            </div>
+
+            <!-- 用户反馈引导 -->
+            <div class="feedback-guide cs-activities">
+                <div class="cs-name">
+                    <span>反馈建议</span>
+                </div>
+                <p style="font-size: 0.7rem; color: #888; padding: 0.5rem;">
+                    如果您有其他想补充的反馈，请点击下方按钮提交。
+                </p>
+                <button class="clay flatter flex-center" style="width: 100%;">提交反馈</button>
+            </div>
+
+            <!-- 底部导航栏保持不变 -->
+            <div class="cs-footer">
+                <span class="material-icons btn-home">home</span>
+                <span class="material-icons btn-cart">calendar_month</span>
+                <!-- <span class="material-icons btn-add clay">add</span> -->
+            </div>
+        </div>
+
+        <audio id="tts-audio" controls autoplay style="display: none;"></audio>
+
+        <!-- ========== JS 脚本部分 ============ -->
+        <script>
+            // 获取DOM元素
+            const recordBtn = document.getElementById('record-btn');
+            const characterAnimation = document.getElementById('character-animation');
+
+            // 设置动画状态常量
+            const ANIMATION_STATE = {
+                TALKING: 'talking',
+                IDLE: 'idle'
+            };
+
+            // 当前动画状态
+            let currentAnimation = ANIMATION_STATE.IDLE;
+
+            // 更新动画背景
+            function updateAnimation(state) {
+                if (state === ANIMATION_STATE.IDLE) {
+                    characterAnimation.style.backgroundImage = "url('./static/idle2.gif')";
+                    recordBtn.classList.add('recording');
+                    recordBtn.textContent = '正在聆听...';
+                } else {
+                    characterAnimation.style.backgroundImage = "url('./static/talking2.gif')";
+                    recordBtn.classList.remove('recording');
+                    recordBtn.textContent = '点击说话';
                 }
-            } else {
-                setTimeout(() => appendBuffer(data), 100);
-            }
-        }
-
-        //const ws = new WebSocket(`ws://${window.location.host}/tts`);
-        ws.binaryType = 'blob';  // 关键设置
-
-        ws.onmessage = function (event) {
-            if (typeof event.data === 'string' && event.data.startsWith("ERROR:")) {
-                alert(event.data);
-                return;
+                currentAnimation = state;
             }
 
-            if (event.data instanceof Blob) {
-                const reader = new FileReader();
-                reader.onload = function () {
-                    const arrayBuffer = reader.result;
-                    buffer.push(new Uint8Array(arrayBuffer));
-                    appendBuffer();
-                };
-                reader.readAsArrayBuffer(event.data);
+            // 按钮按下事件
+            recordBtn.addEventListener('mousedown', () => {
+                updateAnimation(ANIMATION_STATE.IDLE);
+            });
+
+            // 按钮松开事件
+            recordBtn.addEventListener('mouseup', () => {
+                updateAnimation(ANIMATION_STATE.TALKING);
+            });
+
+            // 按钮移出事件
+            recordBtn.addEventListener('mouseleave', () => {
+                updateAnimation(ANIMATION_STATE.TALKING);
+            });
+
+            // 触摸设备支持
+            recordBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // 防止触摸事件和鼠标事件冲突
+                updateAnimation(ANIMATION_STATE.IDLE);
+            });
+
+            recordBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                updateAnimation(ANIMATION_STATE.TALKING);
+            });
+        </script>
+
+        <script>
+            // 初始化雷达图
+            const chartDom = document.getElementById('radarChart');
+            const myChart = echarts.init(chartDom);
+
+            const option = {
+                tooltip: {},
+                radar: {
+                    indicator: [
+                        { name: '沟通能力', max: 10 },
+                        { name: '应变能力', max: 10 },
+                        { name: '产品知识', max: 10 },
+                        { name: '服务意识', max: 10 },
+                        { name: '情绪控制', max: 10 }
+                    ],
+                    shape: 'circle',
+                    splitLine: {
+                        lineStyle: {
+                            color: 'rgba(31, 168, 245, 0.2)'
+                        }
+                    },
+                    axisLine: {
+                        lineStyle: {
+                            color: 'rgba(31, 168, 245, 0.5)'
+                        }
+                    },
+                    splitArea: {
+                        show: false
+                    }
+                },
+                series: [{
+                    name: '评分',
+                    type: 'radar',
+                    data: [{
+                        value: [7, 8, 9, 6, 7],
+                        name: '能力评分'
+                    }],
+                    areaStyle: {
+                        color: 'rgba(31, 168, 245, 0.3)'
+                    },
+                    itemStyle: {
+                        color: '#1fa8f5'
+                    }
+                }]
+            };
+
+            myChart.setOption(option);
+        </script>
+
+        <script>
+            function showScreen(screenClass) {
+                document.querySelectorAll('.screen').forEach(screen => {
+                    screen.classList.remove('active');
+                });
+                const target = document.querySelector(`.${screenClass}`);
+                if (target) target.classList.add('active');
             }
-        };
 
-        function connectAndSend(text) {
-            const ws = new WebSocket(`ws://${window.location.host}/tts`);
-            ws.binaryType = 'blob';
+            // 初始显示 screen-2
+            showScreen('screen-2');
 
-            let mediaSource = new MediaSource();
+            // 绑定按钮点击事件
+            document.querySelector('.screen-2 .clay')?.addEventListener('click', () => {
+                showScreen('screen-4');
+            });
+
+            document.querySelector('.close-btn')?.addEventListener('click', () => {
+                showScreen('screen-1');
+            });
+
+            document.querySelector('.btn-home')?.addEventListener('click', () => {
+                showScreen('screen-2');
+            });
+        </script>
+
+
+        <script>
+            const audioPlayer = document.getElementById("tts-audio");
+            let mediaSource = null;
             let sourceBuffer = null;
             let buffer = [];
-
-            const audioPlayer = document.getElementById("audio-player");
-            audioPlayer.src = URL.createObjectURL(mediaSource);
-
-            mediaSource.addEventListener('sourceopen', () => {
-                sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-                sourceBuffer.mode = 'sequence';
-            });
 
             function appendBuffer() {
                 if (sourceBuffer && !sourceBuffer.updating && buffer.length > 0) {
                     const chunk = buffer.shift();
                     sourceBuffer.appendBuffer(chunk);
-                } else {
+                } else if (buffer.length > 0) {
                     setTimeout(appendBuffer, 100);
                 }
             }
 
-            ws.onmessage = function (event) {
-                if (typeof event.data === 'string' && event.data.startsWith("ERROR:")) {
-                    alert(event.data);
+            function playTextToSpeech(text) {
+                if (!text) return;
+
+                // 重置播放器
+                if (mediaSource) {
+                    mediaSource.endOfStream();
+                    mediaSource = null;
+                    sourceBuffer = null;
+                    buffer = [];
+                }
+
+                mediaSource = new MediaSource();
+                audioPlayer.src = URL.createObjectURL(mediaSource);
+                audioPlayer.style.display = "block";
+
+                mediaSource.addEventListener('sourceopen', () => {
+                    sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                    sourceBuffer.mode = 'sequence';
+                });
+
+                const ws = new WebSocket('wss://10.199.164.14:5001/tts');
+                ws.binaryType = 'blob';
+
+                ws.onopen = () => {
+                    ws.send("TEXT:" + text);
+                };
+
+                ws.onmessage = function (event) {
+                    if (typeof event.data === 'string' && event.data.startsWith("ERROR:")) {
+                        console.error(event.data);
+                        return;
+                    }
+
+                    if (event.data instanceof Blob) {
+                        const reader = new FileReader();
+                        reader.onload = function () {
+                            const arrayBuffer = reader.result;
+                            buffer.push(new Uint8Array(arrayBuffer));
+                            appendBuffer();
+                        };
+                        reader.readAsArrayBuffer(event.data);
+                    }
+                };
+
+                ws.onclose = () => {
+                    console.log("TTS WebSocket 已关闭");
+                };
+
+                ws.onerror = (err) => {
+                    console.error("TTS WebSocket 错误", err);
+                };
+            }
+        </script>
+
+
+
+        <script>
+
+            const chatBox = document.getElementById('chat-messages');
+
+            let ws = null;
+            let audioContext = null;
+            let mediaStream = null;
+            let mediaStreamSource = null;
+            let scriptProcessor = null;
+            let partialText = "";
+            let currentText = "";
+
+
+
+            function updateAnimation(state) {
+                if (state === ANIMATION_STATE.IDLE) {
+                    characterAnimation.style.backgroundImage = "url('./static/idle2.gif')";
+                    recordBtn.classList.add('recording');
+                    recordBtn.textContent = '正在聆听...';
+                } else {
+                    characterAnimation.style.backgroundImage = "url('./static/talking2.gif')";
+                    recordBtn.classList.remove('recording');
+                    recordBtn.textContent = '点击说话';
+                }
+            }
+
+            async function startRecording() {
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
+
+                    mediaStreamSource = audioContext.createMediaStreamSource(mediaStream);
+                    scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+
+                    mediaStreamSource.connect(scriptProcessor);
+                    scriptProcessor.connect(audioContext.destination);
+
+                    // 建立 WebSocket
+                    ws = new WebSocket('wss://10.199.164.14:5001/ws');
+
+                    ws.onopen = () => {
+                        console.log("WebSocket 已连接");
+                    };
+
+                    ws.onmessage = function (event) {
+                        const data = JSON.parse(event.data);
+
+                        //partial
+                        if (data.type === 'partial') {
+                            partialText += data.text;
+                            updateChatMessage(partialText);
+                        }
+
+
+                        if (data.type === 'final') {
+                            partialText = "";
+                            currentText += data.text;
+                            updateChatMessage(currentText);
+                        }
+                    };
+
+                    ws.onerror = function (err) {
+                        console.error("WebSocket 错误:", err);
+                    };
+
+                    ws.onclose = function () {
+                        console.log("WebSocket 已关闭");
+                    };
+
+                    scriptProcessor.onaudioprocess = function (e) {
+                        const inputBuffer = e.inputBuffer;
+                        const inputData = inputBuffer.getChannelData(0);
+                        const buffer = new ArrayBuffer(inputData.length * 2);
+                        const view = new DataView(buffer);
+                        let index = 0;
+                        for (let i = 0; i < inputData.length; i++) {
+                            const s = Math.max(-1, Math.min(1, inputData[i]));
+                            const val = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            view.setInt16(index, val, true);
+                            index += 2;
+                        }
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(buffer);
+                        }
+                    };
+
+                    updateAnimation(ANIMATION_STATE.IDLE);
+                } catch (err) {
+                    console.error('无法获取麦克风权限', err);
+                    alert('请允许麦克风权限');
+                }
+            }
+
+            function stopRecording() {
+                console.log(">停止录音");
+                if (scriptProcessor) {
+                    scriptProcessor.disconnect();
+                    scriptProcessor.onaudioprocess = null;
+                    scriptProcessor = null;
+                }
+                if (mediaStreamSource) {
+                    mediaStreamSource.disconnect();
+                    mediaStreamSource = null;
+                }
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                    mediaStream = null;
+                }
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                if (ws) {
+                    ws.close();
+                    ws = null;
+                }
+
+                console.log(">停止录音,sendMessageToChat",currentText);
+  
+                if (currentText) {
+                    sendMessageToChat(currentText);
+                    currentText = "";
+                }
+
+                updateAnimation(ANIMATION_STATE.TALKING);
+            }
+
+            function updateChatMessage(text) {
+                const last = chatBox.lastChild;
+                if (last && last.querySelector('p')) {
+                    last.querySelector('p').textContent = text;
+                } else {
+                    const div = document.createElement('div');
+                    div.className = 'chat-message user';
+                    div.innerHTML = `<p>${text}</p>`;
+                    chatBox.appendChild(div);
+                }
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+
+            function appendAssistantMessage(text) {
+                const div = document.createElement('div');
+                div.className = 'chat-message assistant';
+                div.innerHTML = `<p>${text}</p>`;
+                chatBox.appendChild(div);
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+
+            async function sendMessageToChat(text) {
+                console.log("获取回答：", text);
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text })
+                });
+
+                if (!response.ok) {
+                    appendAssistantMessage("抱歉，服务器出错了。");
                     return;
                 }
 
-                if (event.data instanceof Blob) {
-                    const reader = new FileReader();
-                    reader.onload = function () {
-                        const arrayBuffer = reader.result;
-                        buffer.push(new Uint8Array(arrayBuffer));
-                        appendBuffer();
-                    };
-                    reader.readAsArrayBuffer(event.data);
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let assistantText = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    assistantText += chunk;
+                    if (chatBox.lastChild && chatBox.lastChild.classList.contains('assistant')) {
+                        chatBox.lastChild.querySelector('p').textContent = assistantText;
+                    } else {
+                        appendAssistantMessage(assistantText);
+                    }
+                    chatBox.scrollTop = chatBox.scrollHeight;
                 }
-            };
 
-            ws.onopen = () => {
-                ws.send("TEXT:" + text);
-            };
-        }
-
-
-        document.getElementById("send-btn").addEventListener("click", () => {
-            const text = document.getElementById("text-input").value;
-            if (text.trim()) {
-                connectAndSend(text);  // 每次都新建 WebSocket
+                // 文本完整后播放语音
+                
+                if (assistantText.trim()) {
+                    console.log(">回答获取完毕：", assistantText);
+                    playTextToSpeech(assistantText); // 调用 TTS 播放语音
+                }
             }
-        });
-    </script>
+
+
+            // 绑定按钮事件
+            recordBtn.addEventListener('mousedown', startRecording);
+            recordBtn.addEventListener('mouseup', stopRecording);
+
+
+            recordBtn.addEventListener('touchstart', e => {
+                e.preventDefault();
+                startRecording();
+            });
+            recordBtn.addEventListener('touchend', e => {
+                e.preventDefault();
+                stopRecording();
+            });
+        </script>
+
+        
+
 </body>
 
 </html>
