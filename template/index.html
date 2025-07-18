@@ -1,1 +1,121 @@
 
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>流式TTS</title>
+</head>
+
+<body>
+    <h2>文本转语音（流式）</h2>
+    <input type="text" id="text-input" placeholder="输入文本..." />
+    <button id="send-btn">发送</button>
+    <audio id="audio-player" controls autoplay></audio>
+
+    <script>
+        const ws = new WebSocket(`ws:${window.location.host}/tts`);
+        const audioPlayer = document.getElementById("audio-player");
+        const mediaSource = new MediaSource();
+        let sourceBuffer = null;
+
+        audioPlayer.src = URL.createObjectURL(mediaSource);
+
+        mediaSource.addEventListener('sourceopen', () => {
+            sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+            sourceBuffer.mode = 'sequence';
+        });
+
+        let buffer = [];
+
+        function appendBuffer(data) {
+            if (sourceBuffer && !sourceBuffer.updating) {
+                if (buffer.length > 0) {
+                    const chunk = buffer.shift();
+                    sourceBuffer.appendBuffer(chunk);
+                }
+            } else {
+                setTimeout(() => appendBuffer(data), 100);
+            }
+        }
+
+        //const ws = new WebSocket(`ws://${window.location.host}/tts`);
+        ws.binaryType = 'blob';  // 关键设置
+
+        ws.onmessage = function (event) {
+            if (typeof event.data === 'string' && event.data.startsWith("ERROR:")) {
+                alert(event.data);
+                return;
+            }
+
+            if (event.data instanceof Blob) {
+                const reader = new FileReader();
+                reader.onload = function () {
+                    const arrayBuffer = reader.result;
+                    buffer.push(new Uint8Array(arrayBuffer));
+                    appendBuffer();
+                };
+                reader.readAsArrayBuffer(event.data);
+            }
+        };
+
+        function connectAndSend(text) {
+            const ws = new WebSocket(`ws://${window.location.host}/tts`);
+            ws.binaryType = 'blob';
+
+            let mediaSource = new MediaSource();
+            let sourceBuffer = null;
+            let buffer = [];
+
+            const audioPlayer = document.getElementById("audio-player");
+            audioPlayer.src = URL.createObjectURL(mediaSource);
+
+            mediaSource.addEventListener('sourceopen', () => {
+                sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                sourceBuffer.mode = 'sequence';
+            });
+
+            function appendBuffer() {
+                if (sourceBuffer && !sourceBuffer.updating && buffer.length > 0) {
+                    const chunk = buffer.shift();
+                    sourceBuffer.appendBuffer(chunk);
+                } else {
+                    setTimeout(appendBuffer, 100);
+                }
+            }
+
+            ws.onmessage = function (event) {
+                if (typeof event.data === 'string' && event.data.startsWith("ERROR:")) {
+                    alert(event.data);
+                    return;
+                }
+
+                if (event.data instanceof Blob) {
+                    const reader = new FileReader();
+                    reader.onload = function () {
+                        const arrayBuffer = reader.result;
+                        buffer.push(new Uint8Array(arrayBuffer));
+                        appendBuffer();
+                    };
+                    reader.readAsArrayBuffer(event.data);
+                }
+            };
+
+            ws.onopen = () => {
+                ws.send("TEXT:" + text);
+            };
+        }
+
+
+        document.getElementById("send-btn").addEventListener("click", () => {
+            const text = document.getElementById("text-input").value;
+            if (text.trim()) {
+                connectAndSend(text);  // 每次都新建 WebSocket
+            }
+        });
+    </script>
+</body>
+
+</html>
