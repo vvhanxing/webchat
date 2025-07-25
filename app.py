@@ -8,13 +8,16 @@ import threading
 import uuid
 
 
-from flask import Flask, render_template, request, Response, jsonify
+from flask import Flask, render_template, request, Response, jsonify,stream_with_context
+
+from flask_cors import CORS  # 新增
 from flask_sock import Sock
 import ssl
 import httpx
 from openai import OpenAI
 import httpx
 app = Flask(__name__)
+CORS(app)
 app.config['SOCK_SERVER_OPTIONS'] = {'ping_interval': 25}
 sock = Sock(app)
 
@@ -50,7 +53,13 @@ class TTSStreamCallback(ResultCallback):
 
     def on_complete(self):
         print(f"{get_timestamp()} [用户 {self.user_id}] 语音合成完成")
-        self.file.close()
+        if self.file:
+            self.file.close()
+        try:
+            # 发送一个空的 blob 作为结束标记（类型为 audio/mpeg）
+            self.ws.send(b"")  # 空字节流
+        except Exception as e:
+            print(f"[WARN] 发送空 blob 结束标记失败: {e}")
 
     def on_error(self, message: str):
         print(f"{get_timestamp()} [用户 {self.user_id}] 合成错误：{message}")
@@ -67,7 +76,7 @@ class TTSStreamCallback(ResultCallback):
     def on_data(self, data: bytes):
         if self.connected:
             self.ws.send(data)  # 直接发送 bytes，flask-sock 会自动识别为二进制帧
-            self.file.write(data)
+            #self.file.write(data)
 
 @sock.route('/tts')
 def tts_websocket(ws):
@@ -137,7 +146,7 @@ class WSCallback(RecognitionCallback):
         print(f"[INFO] {self.user_id}: Recognition completed.")
 
 
-@sock.route('/ws')
+@sock.route('/record')
 def websocket_handler(ws):
     # 获取客户端 IP 和端口
     remote_addr = ws.environ.get('REMOTE_ADDR', 'unknown')
@@ -175,53 +184,107 @@ def uploadpage():
     return render_template('index.html')
 
 
-@app.route('/talk', methods=['GET', 'POST'])
-def talk():
-    return render_template('talk.html')
+# 用于保存每个用户的 conversation_id
+conversation_ids = {}  # {user_id: conversation_id}
 
-# 新增的 /chat 接口
+# API 配置
+API_KEY = "app-GAutSi2mcN9kNSNPOUtYn4hS"
+BASE_URL = "https://test-ookoo.is.panasonic.cn/v1/chat-messages"
+
+# SSL 证书验证路径（如果你有自签名证书，可指定路径）
+# 如果使用 verify=False，仅限测试环境
+VERIFY_SSL = False  # 或指定证书路径，如 '/path/to/cert.pem'
+
+import requests
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
         data = request.get_json()
         user_input = data.get("text", "")
-        print("user_input",user_input)
+        user_id = data.get("user_id", "default_user")
+        conversation_id = data.get("conversation_id", conversation_ids.get(user_id, ""))
+        print("talking conversation id: ",conversation_id)
+
         if not user_input:
             return jsonify({"error": "未提供文本内容"}), 400
 
-        client = OpenAI(
-            api_key="sk-b25cfb29c8e44b65b00fd8540625dddb",
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            http_client=httpx.Client(proxy=proxy)
-        )
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "query": user_input,
+            "inputs": {},
+            "response_mode": "streaming",
+            "user": user_id,
+            "conversation_id": conversation_id,
+            "auto_generate_name": True,
+            "files": []
+        }
 
         def generate():
-            stream = client.chat.completions.create(
-                model="qwen-plus",
-                messages=[
-                    {"role": "system", "content": """
-你是松下展示馆的介绍人员，以下是你准备的材料：
-今年松下连续第7年出展进博会，出展面积1000平方米，消费品馆最大。我们以“Smart Life，Smart Society”为主题，带来涉及生活方面的家电和住宅设备的一体化解决方案，
-以及贴合于绿色发展的车载产品和涉及智能制造的软硬件产品。住空间区域，用2大极具代入感的空间，为消费者提供美好生活的丰富产品和建议。
-相较去年，生活相关展示区域扩大，以2个空间，分别展示适合于30代三口之家的年轻家庭和60代老人与宠物的2种家庭模式的空间设计，并在2个空间周边设置养老区、技术区和产品区，展示松下在空间设计、材质、收纳、清洁、安全呵护等方面的技术优势和设计特点。
-放松空间，不妨来体验按摩椅带来的舒适。                     
-通过以上材料为参展人员简要地解答问题。
-                     
-"""},
-                    {"role": "user", "content": user_input}
-                ],
-                stream=True
-            )
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
+            try:
+                with requests.post(
+                    BASE_URL,
+                    headers=headers,
+                    json=payload,
+                    stream=True,
+                    verify=VERIFY_SSL  # 控制是否验证 SSL 证书
+                ) as resp:
+                    if resp.status_code != 200:
+                        yield f"【错误】: {resp.text}"
+                        return
 
-        return Response(generate(), mimetype='text/event-stream')
+                    answer = ""
+                    for line in resp.iter_lines():
+                        if line:
+                            decoded_line = line.decode('utf-8')
+                            if decoded_line.startswith("data: "):
+                                event_data = decoded_line[len("data: "):]
+                                try:
+                                    event = json.loads(event_data)
+                                    event_type = event.get("event")
+
+                                    if event_type == "message":
+                                        chunk = event.get("answer", "")
+                                        answer += chunk
+                                        yield chunk
+                                    elif event_type == "message_end":
+                                        new_conversation_id = event.get("conversation_id")
+                                        if new_conversation_id:
+                                            conversation_ids[user_id] = new_conversation_id
+                                            yield f"\n【对话结束】\nConversation ID: {new_conversation_id}"
+                                    elif event_type == "error":
+                                        yield f"\n【错误】: {event.get('message')}"
+                                    elif event_type == "ping":
+                                        continue
+                                    else:
+                                        yield f"\n【其他事件】: {event}"
+                                except json.JSONDecodeError:
+                                    yield f"\n【JSON解析失败】: {decoded_line}"
+            except requests.exceptions.RequestException as e:
+                yield f"\n【网络错误】: {str(e)}"
+
+        return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/scenes', methods=['POST','GET'])
+def get_scenes():
+    scenes = [
+    {"scene_name":"销售训练场景",
+"role":["小王","小张"],
+"character_description":["男性，35","女性，32"],
+"scene_introduction":"扮演团队中的经理",
+"conversation_goals":"改进计划，并获取承诺"}
+]
+    
+    response = jsonify(scenes)
+    response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    return response
 
 if __name__ == '__main__':
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
