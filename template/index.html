@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>智能对练Agent</title>
-    <link rel="stylesheet" href="https://public.codepenassets.com/css/reset-2.0.min.css">
+    <link rel="stylesheet" href="./static/reset-2.0.min.css">
     <link rel="stylesheet" href="./static/style.css">
     <script src="./static/echarts.min.js"></script>
 
@@ -53,7 +53,9 @@
 
             <span class="material-icons close-btn">close</span>
             <!-- 动态人物动画区域 -->
-            <div class="character-animation" id="character-animation"></div>
+            <div class="character-animation" id="character-animation">
+                <video id="animation-video" loop muted playsinline></video>
+            </div>
             <!-- 对话内容容器 -->
             <div class="chat-container">
                 <!-- <div class="chat-message assistant">
@@ -68,6 +70,8 @@
             <div class="record-area">
                 <button id="record-btn">点击说话</button>
             </div>
+
+            <audio id="tts-audio" controls autoplay style="display: none;"></audio>
 
         </div>
 
@@ -132,7 +136,7 @@
             </div>
         </div>
 
-        <audio id="tts-audio" controls autoplay style="display: none;"></audio>
+
 
         <!-- ========== JS 脚本部分 ============ -->
         <script>
@@ -146,22 +150,7 @@
                 IDLE: 'idle'
             };
 
-            // 当前动画状态
-            let currentAnimation = ANIMATION_STATE.IDLE;
 
-            // 更新动画背景
-            function updateAnimation(state) {
-                if (state === ANIMATION_STATE.IDLE) {
-                    characterAnimation.style.backgroundImage = "url('./static/idle2.gif')";
-                    recordBtn.classList.add('recording');
-                    recordBtn.textContent = '正在聆听...';
-                } else {
-                    characterAnimation.style.backgroundImage = "url('./static/talking2.gif')";
-                    recordBtn.classList.remove('recording');
-                    recordBtn.textContent = '点击说话';
-                }
-                currentAnimation = state;
-            }
 
             // 按钮按下事件
             recordBtn.addEventListener('mousedown', () => {
@@ -173,10 +162,7 @@
                 updateAnimation(ANIMATION_STATE.TALKING);
             });
 
-            // 按钮移出事件
-            recordBtn.addEventListener('mouseleave', () => {
-                updateAnimation(ANIMATION_STATE.TALKING);
-            });
+
 
             // 触摸设备支持
             recordBtn.addEventListener('touchstart', (e) => {
@@ -240,13 +226,27 @@
         </script>
 
         <script>
+            let hasPreloaded = false;
+
             function showScreen(screenClass) {
                 document.querySelectorAll('.screen').forEach(screen => {
                     screen.classList.remove('active');
                 });
                 const target = document.querySelector(`.${screenClass}`);
-                if (target) target.classList.add('active');
+                if (target) {
+                    target.classList.add('active');
+                }
+
+                // 如果切换到 screen-4，初始化 idle 动画
+                if (screenClass === 'screen-4') {
+
+
+
+
+                    updateAnimation(ANIMATION_STATE.IDLE);
+                }
             }
+
 
             // 初始显示 screen-2
             showScreen('screen-2');
@@ -281,7 +281,7 @@
                 }
             }
 
-            function playTextToSpeech(text) {
+            async function playTextToSpeech(text) {
                 if (!text) return;
 
                 // 重置播放器
@@ -296,6 +296,18 @@
                 audioPlayer.src = URL.createObjectURL(mediaSource);
                 audioPlayer.style.display = "block";
 
+                // 在 ended/error 中清除
+                audioPlayer.addEventListener('ended', () => {
+
+                    updateAnimation(ANIMATION_STATE.IDLE);
+                }, { once: true });
+
+                audioPlayer.addEventListener('error', () => {
+
+                    updateAnimation(ANIMATION_STATE.IDLE);
+                }, { once: true });
+
+
                 mediaSource.addEventListener('sourceopen', () => {
                     sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
                     sourceBuffer.mode = 'sequence';
@@ -305,6 +317,7 @@
                 ws.binaryType = 'blob';
 
                 ws.onopen = () => {
+                    console.log('TTS WebSocket connected');
                     ws.send("TEXT:" + text);
                 };
 
@@ -326,11 +339,14 @@
                 };
 
                 ws.onclose = () => {
-                    console.log("TTS WebSocket 已关闭");
+
+                    console.log('TTS WebSocket closed');
+
+
                 };
 
                 ws.onerror = (err) => {
-                    console.error("TTS WebSocket 错误", err);
+                    console.log("TTS WebSocket 错误:", err);
                 };
             }
         </script>
@@ -351,17 +367,91 @@
 
 
 
+            // 预加载视频对象
+            const videoSources = {
+                idle: './static/idle2.mp4',
+                talking: './static/talking2.mp4'
+            };
+
+            // 缓存预加载的视频元素
+            const cachedVideos = {};
+
+            // 预加载视频
+            function preloadVideo(key, src) {
+                return new Promise((resolve, reject) => {
+                    const video = document.createElement('video');
+                    video.src = src;
+                    video.muted = true;
+                    video.loop = true;
+                    video.preload = 'auto';
+
+                    video.onloadeddata = () => {
+                        // 视频元数据加载完成，可以播放第一帧
+                        cachedVideos[key] = video;
+                        resolve(video);
+                    };
+
+                    video.onerror = (err) => {
+                        console.error(`预加载视频失败: ${key}`, err);
+                        reject(err);
+                    };
+
+                    // 手动加载
+                    video.load();
+                });
+            }
+
+
+
+            // 更新动画（使用缓存或动态创建）
+
             function updateAnimation(state) {
-                if (state === ANIMATION_STATE.IDLE) {
-                    characterAnimation.style.backgroundImage = "url('./static/idle2.gif')";
+                const video = document.getElementById('animation-video');
+
+                if (!video) return;
+
+                const targetKey = state === ANIMATION_STATE.IDLE ? 'idle' : 'talking';
+                const targetSrc = videoSources[targetKey];
+
+                if (state === ANIMATION_STATE.IDLE && hasPreloaded === true) {
+
                     recordBtn.classList.add('recording');
                     recordBtn.textContent = '正在聆听...';
+
                 } else {
-                    characterAnimation.style.backgroundImage = "url('./static/talking2.gif')";
+
                     recordBtn.classList.remove('recording');
                     recordBtn.textContent = '点击说话';
                 }
+
+                hasPreloaded = true;
+
+                // 如果已有缓存视频，直接使用
+                if (cachedVideos[targetKey]) {
+                    const cachedVideo = cachedVideos[targetKey];
+                    if (video.src !== cachedVideo.src) {
+                        video.src = cachedVideo.src;
+                        video.muted = true;
+                        video.loop = true;
+                    }
+                    video.play().catch(err => {
+                        console.warn("播放被阻止", err);
+                    });
+                    return;
+                }
+
+                // 降级：直接设置 src
+                if (video.src !== targetSrc) {
+                    video.src = targetSrc;
+                }
+                video.muted = true;
+                video.loop = true;
+                video.play().catch(err => {
+                    console.warn("自动播放被阻止", err);
+                });
             }
+
+
 
             async function startRecording() {
                 try {
@@ -378,10 +468,10 @@
                     scriptProcessor.connect(audioContext.destination);
 
                     // 建立 WebSocket
-                    ws = new WebSocket('wss://10.199.164.14:5001/ws');
+                    ws = new WebSocket('wss://10.199.164.14:5001/record');
 
                     ws.onopen = () => {
-                        console.log("WebSocket 已连接");
+                        console.log("Record WebSocket 已连接");
                     };
 
                     ws.onmessage = function (event) {
@@ -389,7 +479,7 @@
 
                         //partial
                         if (data.type === 'partial') {
-                            partialText += data.text;
+                            partialText = data.text;
                             updateChatMessage(partialText);
                         }
 
@@ -402,11 +492,11 @@
                     };
 
                     ws.onerror = function (err) {
-                        console.error("WebSocket 错误:", err);
+                        console.error("Record WebSocket 错误:", err);
                     };
 
                     ws.onclose = function () {
-                        console.log("WebSocket 已关闭");
+                        console.log("Record WebSocket 已关闭");
                     };
 
                     scriptProcessor.onaudioprocess = function (e) {
@@ -457,8 +547,7 @@
                     ws = null;
                 }
 
-                console.log(">停止录音,sendMessageToChat",currentText);
-  
+
                 if (currentText) {
                     sendMessageToChat(currentText);
                     currentText = "";
@@ -469,8 +558,15 @@
 
             function updateChatMessage(text) {
                 const last = chatBox.lastChild;
-                if (last && last.querySelector('p')) {
-                    last.querySelector('p').textContent = text;
+                if (last && chatBox.querySelector('.chat-message.user').querySelector('p')) {
+                    // last.querySelector('p').textContent = text;
+
+                    chatBox.querySelector('.chat-message.user').querySelector('p').textContent = text;
+
+                    if (chatBox.querySelector('.chat-message.assistant')) {
+                        chatBox.querySelector('.chat-message.assistant').querySelector('p').textContent = "";
+                    }
+
                 } else {
                     const div = document.createElement('div');
                     div.className = 'chat-message user';
@@ -488,14 +584,22 @@
                 chatBox.scrollTop = chatBox.scrollHeight;
             }
 
+            let currentConversationId = ""; // 保存当前会话 ID
+            let currentUser = "user-001";   // 假设前端指定用户 ID
+
+
             async function sendMessageToChat(text) {
-                console.log("获取回答：", text);
+                console.log("发送用户输入：", text);
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ text })
+                    body: JSON.stringify({
+                        text,
+                        user_id: currentUser,
+                        conversation_id: currentConversationId
+                    })
                 });
 
                 if (!response.ok) {
@@ -511,6 +615,19 @@
                     const { done, value } = await reader.read();
                     if (done) break;
                     const chunk = decoder.decode(value, { stream: true });
+
+
+                    console.log("接收到的数据：", chunk);
+                    // 判断是否是结束标记
+                    if (chunk.includes("【对话结束】")) {
+                        const match = chunk.match(/Conversation ID: ([a-f0-9\-]+)/);
+                        if (match) {
+                            currentConversationId = match[1]; // 更新 conversation_id
+                            console.log("更新 conversation_id 为：", currentConversationId);
+                        }
+                        continue;
+                    }
+
                     assistantText += chunk;
                     if (chatBox.lastChild && chatBox.lastChild.classList.contains('assistant')) {
                         chatBox.lastChild.querySelector('p').textContent = assistantText;
@@ -520,13 +637,14 @@
                     chatBox.scrollTop = chatBox.scrollHeight;
                 }
 
-                // 文本完整后播放语音
-                
                 if (assistantText.trim()) {
-                    console.log(">回答获取完毕：", assistantText);
                     playTextToSpeech(assistantText); // 调用 TTS 播放语音
+
                 }
             }
+
+
+
 
 
             // 绑定按钮事件
@@ -542,9 +660,29 @@
                 e.preventDefault();
                 stopRecording();
             });
+
+            // 初始化预加载
+            async function initAnimationSystem() {
+                try {
+                    await Promise.all([
+                        preloadVideo('idle', videoSources.idle),
+                        preloadVideo('talking', videoSources.talking)
+                    ]);
+                    console.log('✅ 视频预加载完成');
+                } catch (err) {
+                    console.warn('⚠️ 视频预加载失败，降级处理', err);
+                }
+            }
+
+
+            // 页面加载完成后预加载动画视频
+            window.addEventListener('load', () => {
+                initAnimationSystem();
+            });
+
         </script>
 
-        
+
 
 </body>
 
