@@ -615,26 +615,45 @@
                     const { done, value } = await reader.read();
                     if (done) break;
                     const chunk = decoder.decode(value, { stream: true });
-
-
                     console.log("接收到的数据：", chunk);
-                    // 判断是否是结束标记
-                    if (chunk.includes("【对话结束】")) {
+
+                    // ===== 修复关键：处理包含结束标记的chunk =====
+                    const endIndex = chunk.indexOf("【对话结束】");
+                    if (endIndex !== -1) {
+                        // 1. 提取结束标记前的有效文本
+                        const validText = chunk.substring(0, endIndex);
+                        assistantText += validText;
+
+                        // 2. 立即更新UI（修复点：确保有效文本被显示）
+                        if (chatBox.lastChild && chatBox.lastChild.classList.contains('assistant')) {
+                            chatBox.lastChild.querySelector('p').textContent = assistantText;
+                        } else if (validText.trim()) { // 避免创建空消息
+                            appendAssistantMessage(assistantText);
+                        }
+                        chatBox.scrollTop = chatBox.scrollHeight;
+
+                        // 3. 处理结束标记（提取conversation_id）
                         const match = chunk.match(/Conversation ID: ([a-f0-9\-]+)/);
                         if (match) {
-                            currentConversationId = match[1]; // 更新 conversation_id
+                            currentConversationId = match[1];
                             console.log("更新 conversation_id 为：", currentConversationId);
                         }
-                        continue;
+                        // 注意：结束标记后的部分（如ID信息）不添加到消息
                     }
+                    // ===== 修复结束 =====
+                    else {
+                        assistantText += chunk;
+                        if (chatBox.lastChild && chatBox.lastChild.classList.contains('assistant')) {
+                            chatBox.lastChild.querySelector('p').textContent = assistantText;
+                        } else {
+                            appendAssistantMessage(assistantText);
+                        }
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+                }
 
-                    assistantText += chunk;
-                    if (chatBox.lastChild && chatBox.lastChild.classList.contains('assistant')) {
-                        chatBox.lastChild.querySelector('p').textContent = assistantText;
-                    } else {
-                        appendAssistantMessage(assistantText);
-                    }
-                    chatBox.scrollTop = chatBox.scrollHeight;
+                if (assistantText.trim()) {
+                    playTextToSpeech(assistantText);
                 }
 
                 if (assistantText.trim()) {
